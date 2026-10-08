@@ -1,0 +1,88 @@
+name: Build all platforms
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            out: mkcap-windows-x64.exe
+          - os: ubuntu-latest
+            out: mkcap-linux-x64
+          - os: macos-latest
+            out: mkcap-macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install nuitka ordered-set zstandard
+          pip install -r requirements.txt
+
+      - name: Build
+        run: python -m nuitka --onefile --assume-yes-for-downloads --output-filename=${{ matrix.out }} mkcap.py
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          chmod +x ./${{ matrix.out }} || true
+          ./${{ matrix.out }} --help
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.out }}
+          path: ${{ matrix.out }}
+
+  publish-binaries:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd /tmp/dist
+          chmod +x mkcap-linux-x64 mkcap-macos-arm64
+          sha256sum mkcap-* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Push to binaries branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code --heads origin binaries; then
+            git fetch origin binaries
+            git checkout binaries
+          else
+            git checkout --orphan binaries
+          fi
+
+          git rm -rf . > /dev/null 2>&1 || true
+          cp /tmp/dist/* .
+          git add .
+          git commit -m "Binaries for ${{ github.ref_name }}" || echo "No changes"
+          git push origin binaries
