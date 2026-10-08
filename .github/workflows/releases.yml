@@ -29,20 +29,28 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install
+      - name: Install patchelf (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y patchelf
+
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install nuitka ordered-set zstandard
-          pip install -r requirements.txt
+          pip install nuitka ordered-set zstandard groq rich
 
       - name: Build
-        run: python -m nuitka --onefile --assume-yes-for-downloads --output-filename=${{ matrix.out }} mkcap.py
+        run: >
+          python -m nuitka --onefile --assume-yes-for-downloads
+          --include-package=mkcap_source_code
+          --output-filename=${{ matrix.out }}
+          main.py
 
       - name: Smoke test
         shell: bash
+        timeout-minutes: 2
         run: |
           chmod +x ./${{ matrix.out }} || true
-          ./${{ matrix.out }} --help
+          ./${{ matrix.out }} --version
 
       - uses: actions/upload-artifact@v4
         with:

@@ -1,6 +1,7 @@
 main.build
 main.dist
 main.onefile-build
+mkcap-windows-x64.zip
 __pycache__
 + .vscode
 + mkcap.exe
