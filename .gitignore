@@ -2,5 +2,5 @@ main.build
 main.dist
 main.onefile-build
 __pycache__
-.vscode
-mkcap.exe
++ .vscode
++ mkcap.exe
