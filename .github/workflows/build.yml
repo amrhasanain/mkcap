@@ -23,10 +23,6 @@ jobs:
             artifact: mkcap-macos-arm64
             binary: mkcap
             ext: ""
-          - os: macos-15-intel        # Intel
-            artifact: mkcap-macos-x64
-            binary: mkcap
-            ext: ""
 
     runs-on: ${{ matrix.os }}
 
@@ -36,12 +32,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install groq rich certifi
+          pip install groq rich certifi nuitka ordered-set zstandard
 
       - name: Install patchelf (Linux)
         if: runner.os == 'Linux'
@@ -58,18 +53,20 @@ jobs:
           restore-keys: nuitka-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Build (Nuitka)
-        uses: Nuitka/Nuitka-Action@main
-        with:
-          nuitka-version: main
-          script-name: mkcap.py
-          mode: onefile
-          output-file: ${{ matrix.binary }}
-          include-package: mkcap_source_code
-          include-package-data: rich
-          lto: no
-          onefile-no-compression: true
-          python-flag: no_docstrings,-OO
-          nofollow-import-to: tkinter,unittest,test,pydoc,doctest
+        shell: bash
+        run: |
+          python -m nuitka \
+            --onefile \
+            --assume-yes-for-downloads \
+            --output-dir=build \
+            --output-filename=${{ matrix.binary }} \
+            --include-package=mkcap_source_code \
+            --include-package-data=rich \
+            --include-package-data=certifi \
+            --lto=no \
+            --onefile-no-compression \
+            --nofollow-import-to=tkinter,unittest,test,pydoc,doctest \
+            mkcap.py
 
       - name: Collect binary
         shell: bash
@@ -78,10 +75,11 @@ jobs:
           SRC="build/${{ matrix.binary }}"
           if [ ! -f "$SRC" ]; then
             echo "Binary not found at $SRC. Output tree:"
-            find build -maxdepth 2 2>/dev/null || true
+            find build -maxdepth 2 || true
             exit 1
           fi
           cp "$SRC" "out/${{ matrix.artifact }}${{ matrix.ext }}"
+          chmod +x "out/${{ matrix.artifact }}${{ matrix.ext }}"
 
       - name: Smoke test
         shell: bash
