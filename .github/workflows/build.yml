@@ -1,0 +1,110 @@
+name: Build mkcap
+
+on:
+  push:
+    tags: ["v*"]        # tag جديد = build + Release
+  workflow_dispatch:     # تشغيل يدوي من تاب Actions
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: mkcap-windows-x64
+            binary: mkcap.exe
+            ext: ".exe"
+          - os: ubuntu-latest
+            artifact: mkcap-linux-x64
+            binary: mkcap
+            ext: ""
+          - os: macos-latest          # Apple Silicon
+            artifact: mkcap-macos-arm64
+            binary: mkcap
+            ext: ""
+          - os: macos-15-intel        # Intel
+            artifact: mkcap-macos-x64
+            binary: mkcap
+            ext: ""
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install groq rich certifi
+
+      - name: Install patchelf (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y patchelf
+
+      - name: Cache Nuitka
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/Nuitka
+            ~/AppData/Local/Nuitka/Nuitka/Cache
+            ~/Library/Caches/Nuitka
+          key: nuitka-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('mkcap.py', 'mkcap_source_code/**') }}
+          restore-keys: nuitka-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Build (Nuitka)
+        uses: Nuitka/Nuitka-Action@main
+        with:
+          nuitka-version: main
+          script-name: mkcap.py
+          mode: onefile
+          output-file: ${{ matrix.binary }}
+          include-package: mkcap_source_code
+          include-package-data: rich
+          lto: no
+          onefile-no-compression: true
+          python-flag: no_docstrings,-OO
+          nofollow-import-to: tkinter,unittest,test,pydoc,doctest
+
+      - name: Collect binary
+        shell: bash
+        run: |
+          mkdir -p out
+          SRC="build/${{ matrix.binary }}"
+          if [ ! -f "$SRC" ]; then
+            echo "Binary not found at $SRC. Output tree:"
+            find build -maxdepth 2 2>/dev/null || true
+            exit 1
+          fi
+          cp "$SRC" "out/${{ matrix.artifact }}${{ matrix.ext }}"
+
+      - name: Smoke test
+        shell: bash
+        run: ./out/${{ matrix.artifact }}${{ matrix.ext }} --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: out/*
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
